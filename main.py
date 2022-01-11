@@ -73,7 +73,7 @@ def score_to_score_bucket(score):
     return "over_5000"
 
 
-def map_to_score_and_save_as_file(rdd, file_name):
+def reduce_to_score_and_save_as_file(rdd, file_name):
     rdd.groupByKey() \
         .mapValues(
         lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
@@ -82,165 +82,104 @@ def map_to_score_and_save_as_file(rdd, file_name):
         .saveAsTextFile(file_name)
 
 
+def reduce_to_score_sort_by_count_and_save_as_file(rdd, file_name):
+    rdd.groupByKey() \
+        .mapValues(
+        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
+                        len(list(scores))]) \
+        .sortBy(lambda result: (result[1][4], result[1][0]), False) \
+        .saveAsTextFile(file_name)
+
+
 def story_analysis(sc):
     myRDD = sc.textFile("small_data_random.txt").map(lambda line: json.loads(line))
 
-    myRDD.filter(lambda entry: entry['text'] not in ["", None]) \
-        .map(lambda entry: (
-        [x for x in re.sub('(\W|\d)', ' ', entry['text']).lower().split()], entry['score'])) \
-        .flatMap(lambda data: [(trigram, data[1]) for trigram in zip(data[0], data[0][1:], data[0][2:])]) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: (result[1][4], result[1][0]), False) \
-        .saveAsTextFile("content/trigrams/scores_by_text_trigrams")
+    reduce_to_score_sort_by_count_and_save_as_file(
+        myRDD.filter(lambda entry: entry['text'] not in ["", None]) \
+            .map(lambda entry: (
+            [x for x in re.sub('(\W|\d)', ' ', entry['text']).lower().split()], entry['score'])) \
+            .flatMap(lambda data: [(trigram, data[1]) for trigram in zip(data[0], data[0][1:], data[0][2:])])
+        , "content/trigrams/scores_by_text_trigrams")
 
-    myRDD.map(lambda entry: (
-        [x for x in re.sub('(\W|\d)', ' ', entry['title']).lower().split()], entry['score'])) \
-        .flatMap(lambda data: [(trigram, data[1]) for trigram in zip(data[0], data[0][1:], data[0][2:])]) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: (result[1][4], result[1][0]), False) \
-        .saveAsTextFile("content/trigrams/scores_by_title_trigrams")
+    reduce_to_score_sort_by_count_and_save_as_file(
+        myRDD.map(lambda entry: (
+            [x for x in re.sub('(\W|\d)', ' ', entry['title']).lower().split()], entry['score'])) \
+            .flatMap(lambda data: [(trigram, data[1]) for trigram in zip(data[0], data[0][1:], data[0][2:])])
+        , "content/trigrams/scores_by_title_trigrams")
 
-    map_to_score_and_save_as_file(
+    reduce_to_score_and_save_as_file(
         myRDD.filter(lambda entry: entry['text'] not in ["", None])
-             .map(lambda entry: ([x for x in set(re.sub('(\W|\d)', ' ', entry['text']).lower().split()) if
+            .map(lambda entry: ([x for x in set(re.sub('(\W|\d)', ' ', entry['text']).lower().split()) if
                                  (x not in most_common_words) is True], entry['score']))
-            .flatMap(lambda data: [(word, data[1]) for word in data[0]])
-        , "content/word/scores_by_word_text")
+            .flatMap(lambda data: [(word, data[1]) for word in data[0]]),
+        "content/word/scores_by_word_text")
 
-    myRDD.map(lambda entry: (score_to_score_bucket(entry['score']), entry['descendants'])) \
-        .groupByKey() \
-        .mapValues(
-        lambda comments: [np.mean(list(comments)), np.var(list(comments)), np.max(list(comments)),
-                          np.min(list(comments)),
-                          len(list(comments))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("story/comments_by_score_bucket")
+    reduce_to_score_and_save_as_file(
+        myRDD.map(lambda entry: (
+            [x for x in set(re.sub('(\W|\d)', ' ', entry['title']).lower().split()) if
+             (x not in most_common_words) == True], entry['score']))
+            .flatMap(lambda data: [(word, data[1]) for word in data[0]]),
+        "content/word/scores_by_word_title")
 
-    myRDD.map(lambda entry: (
-        [x for x in set(re.sub('(\W|\d)', ' ', entry['title']).lower().split()) if
-         (x not in most_common_words) == True],
-        entry['score'])) \
-        .flatMap(lambda data: [(word, data[1]) for word in data[0]]) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("content/word/scores_by_word_title")
+    reduce_to_score_and_save_as_file(
+        myRDD.map(lambda entry: (score_to_score_bucket(entry['score']), entry['descendants'])),
+        "story/comments_by_score_bucket")
 
-    myRDD.filter(lambda entry: entry['url'] is not None) \
-        .filter(lambda entry: entry['url'].startswith('http')) \
-        .map(
-        lambda entry: (re.compile("^(?:https?:\/\/)?(?:www\.)?([^:\/\n?]+)").findall(entry['url'])[0], entry['score'])) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("story/scores_by_domain")
+    reduce_to_score_and_save_as_file(
+        myRDD.filter(lambda entry: entry['url'] is not None) \
+            .filter(lambda entry: entry['url'].startswith('http')) \
+            .map(
+            lambda entry: (
+                re.compile("^(?:https?:\/\/)?(?:www\.)?([^:\/\n?]+)").findall(entry['url'])[0], entry['score'])),
+        "story/scores_by_domain")
 
-    myRDD.map(lambda entry: (entry['author'], entry['score'])) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("story/scores_by_author")
+    reduce_to_score_and_save_as_file(
+        myRDD.map(lambda entry: (entry['author'], entry['score'])),
+        "story/scores_by_author")
 
-    myRDD.map(lambda entry: (
-        (datetime.datetime.fromtimestamp(entry['time']).year, datetime.datetime.fromtimestamp(entry['time']).month),
-        entry['score'])) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("time/scores_by_year_month")
+    reduce_to_score_and_save_as_file(
+        myRDD.map(lambda entry: (
+            (datetime.datetime.fromtimestamp(entry['time']).year, datetime.datetime.fromtimestamp(entry['time']).month),
+            entry['score'])), "time/scores_by_year_month")
 
-    myRDD.map(lambda entry: (datetime.datetime.fromtimestamp(entry['time']).year, entry['score'])) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("time/scores_by_year")
+    reduce_to_score_and_save_as_file(
+        myRDD.map(lambda entry: (datetime.datetime.fromtimestamp(entry['time']).year, entry['score'])),
+        "time/scores_by_year")
 
-    myRDD.map(lambda entry: (datetime.datetime.fromtimestamp(entry['time']).month, entry['score'])) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("time/scores_by_month")
+    reduce_to_score_and_save_as_file(
+        myRDD.map(lambda entry: (datetime.datetime.fromtimestamp(entry['time']).month, entry['score'])),
+        "time/scores_by_month")
 
-    myRDD.map(lambda entry: (datetime.datetime.fromtimestamp(entry['time']).day, entry['score'])) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("time/scores_by_day")
+    reduce_to_score_and_save_as_file(
+        myRDD.map(lambda entry: (datetime.datetime.fromtimestamp(entry['time']).day, entry['score'])),
+        "time/scores_by_day")
 
-    myRDD.map(lambda entry: (datetime.datetime.fromtimestamp(entry['time']).hour, entry['score'])) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("time/scores_by_hour")
+    reduce_to_score_and_save_as_file(
+        myRDD.map(lambda entry: (datetime.datetime.fromtimestamp(entry['time']).hour, entry['score'])),
+        "time/scores_by_hour")
 
 
 def story_comments_analysis(sc):
     myRDD = sc.textFile("small_data_random_s_c.txt").map(lambda line: json.loads(line))
 
-    myRDD.map(lambda entry: (entry['author_1'], entry['score'])) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("comments/scores_by_author")
+    reduce_to_score_and_save_as_file(
+        myRDD.map(lambda entry: (entry['author_1'], entry['score'])),
+        "comments/scores_by_author")
 
-    myRDD.filter(lambda entry: entry['text_1'] not in ["", None]) \
-        .map(lambda entry: (
-        [x for x in set(re.sub('(\W|\d)', ' ', entry['text_1']).lower().split()) if
-         (x not in most_common_words) == True],
-        entry['score'])) \
-        .flatMap(lambda data: [(word, data[1]) for word in data[0]]) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: result[1][0], False) \
-        .saveAsTextFile("content/word/scores_by_word_comment")
+    reduce_to_score_and_save_as_file(
+        myRDD.filter(lambda entry: entry['text_1'] not in ["", None]) \
+            .map(lambda entry: (
+            [x for x in set(re.sub('(\W|\d)', ' ', entry['text_1']).lower().split()) if
+             (x not in most_common_words) == True], entry['score']))
+            .flatMap(lambda data: [(word, data[1]) for word in data[0]]),
+        "content/word/scores_by_word_comment")
 
-    myRDD.filter(lambda entry: entry['text_1'] not in ["", None]) \
-        .map(lambda entry: (
-        [x for x in re.sub('(\W|\d)', ' ', entry['text_1']).lower().split()], entry['score'])) \
-        .flatMap(lambda data: [(trigram, data[1]) for trigram in zip(data[0], data[0][1:], data[0][2:])]) \
-        .groupByKey() \
-        .mapValues(
-        lambda scores: [np.mean(list(scores)), np.var(list(scores)), np.max(list(scores)), np.min(list(scores)),
-                        len(list(scores))]) \
-        .sortBy(lambda result: (result[1][4], result[1][0]), False) \
-        .saveAsTextFile("content/trigrams/scores_by_comment_trigrams")
-
-
-def month_analysis(month, year):
-    myRDD = sc.textFile("small_data_random_s_c.txt").map(lambda line: json.loads(line))
-    file_prefix = "month_analysis/year/month/"
-
-    # top author
-    # top commentor
-    # top domains
-    # title, text, comment trigrams
-    # scores by day
+    reduce_to_score_sort_by_count_and_save_as_file(
+        myRDD.filter(lambda entry: entry['text_1'] not in ["", None]) \
+            .map(lambda entry: (
+            [x for x in re.sub('(\W|\d)', ' ', entry['text_1']).lower().split()], entry['score'])) \
+            .flatMap(lambda data: [(trigram, data[1]) for trigram in zip(data[0], data[0][1:], data[0][2:])]),
+        "content/trigrams/scores_by_comment_trigrams")
 
 
 if __name__ == '__main__':
