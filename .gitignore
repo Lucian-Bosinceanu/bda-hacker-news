@@ -132,3 +132,5 @@ dmypy.json
 gcp_api_keys.json
 all_data*.txt
 small_data*.txt
+batches
+.DS_Store
